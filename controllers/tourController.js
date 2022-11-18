@@ -1,21 +1,22 @@
 const Tour = require('../models/tourModel');
 
-// used when we were having the local DB
-// const tours = JSON.parse(
-//   fs.readFileSync(`${__dirname}/../dev-data/data/tours-simple.json`)
-// );
+//  in here is the middleware
+
+exports.aliasTopTours = (req, res, next) => {
+  // limit=5&sort=-ratingsAverage,price
+  req.query.limit = '5';
+  req.query.sort = '-ratingsAverage,price';
+  req.query.fields = 'name, price, ratigsAverage, summary, difficulty';
+  next();
+};
 
 exports.getAllTours = async (req, res) => {
   try {
-    // 1. EXECUTE QUERY
     // console.log('query', req.query);
-    const queryObj = { ...req.query };
-    const excludedFields = ['page', 'sort', 'limit', 'fields'];
-    excludedFields.forEach((el) => delete queryObj[el]);
+    // A. EXECUTE QUERY
+    // 1A) Filtering
 
-    const query = await Tour.find(queryObj);
-
-    console.log('query', typeof query);
+    console.log('-');
 
     // ONE WAY OF FILTERING - BASIC
     // const query = await Tour.find({
@@ -30,10 +31,61 @@ exports.getAllTours = async (req, res) => {
     //   .where('difficulty')
     //   .equals('easy');
 
-    // 2. EXECUTE QUERY
+    const queryObj = { ...req.query };
+    const excludedFields = ['page', 'sort', 'limit', 'fields'];
+    excludedFields.forEach((el) => delete queryObj[el]);
+
+    // 1B) Advanced filtering
+    // adding $ for fitlering on  >= , > , <= , <
+    let queryStr = JSON.stringify(queryObj);
+    queryStr = queryStr.replace(/(gte|gt|lte|lt)\b/g, (match) => `$${match}`);
+
+    let query = Tour.find(JSON.parse(queryStr));
+    // console.log(req.query);
+
+    console.log('----');
+
+    // 2) SORTING
+
+    if (req.query.sort) {
+      const sortBy = req.query.sort.split(',').join(' ');
+      query = query.sort(sortBy);
+    } else {
+      // if no sorting we are going to sort by createdAt, ascending thanx to -
+      query = query.sort('-createdAt');
+    }
+
+    // 3) FIELD LIMITING
+
+    if (req.query.fields) {
+      const fields = req.query.fields.split(',').join(' ');
+      console.log('test', req.query.fields);
+      query = query.select(fields);
+    } else {
+      // here the - excludes. So we get everything except __v
+      query = query.select('-__v');
+    }
+
+    // 4) Pagination
+    const page = req.query.page * 1 || 1;
+    const limit = req.query.limit * 1 || 100;
+    const skip = (page - 1) * limit;
+    query = query.skip(skip).limit(limit);
+
+    if (req.query.page) {
+      const numTours = await Tour.countDocuments();
+      // console.log('numTours', numTours);
+      // console.log('limit', limit);
+      // console.log('page', page);
+      if (skip >= numTours) {
+        throw new Error('over the limit');
+      }
+    }
+
+    // B. EXECUTE QUERY
     const tours = await query;
 
-    // 3. SEND RESPONSE
+    // C. SEND RESPONSE
     res.status(200).json({
       status: 'success',
       results: tours.length,
